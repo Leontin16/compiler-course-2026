@@ -17,6 +17,7 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
 
   switch (kind) {
 
+  // --- reinterpret territory --------------------------------------------
   case CK_BitCast:
   case CK_LValueBitCast:
     if (dst->isVoidPointerType() || src->isVoidPointerType())
@@ -28,6 +29,7 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
   case CK_ReinterpretMemberPointer:
     return "reinterpret_cast";
 
+  // --- const_cast territory ---------------------------------------------
   case CK_NoOp: {
     if (dst->isPointerType() && src->isPointerType()) {
       QualType dstPointee = dst->getPointeeType().getUnqualifiedType();
@@ -40,6 +42,7 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
     return "static_cast";
   }
 
+  // --- dynamic_cast territory -------------------------------------------
   case CK_BaseToDerived: {
     QualType srcBase = src->isPointerType() ? src->getPointeeType() : src;
     if (const auto *rd = srcBase->getAsCXXRecordDecl())
@@ -48,6 +51,7 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
     return "static_cast";
   }
 
+  // --- static_cast territory --------------------------------------------
   case CK_DerivedToBase:
   case CK_UncheckedDerivedToBase:
   case CK_IntegralCast:
@@ -75,6 +79,7 @@ public:
   bool VisitCStyleCastExpr(CStyleCastExpr *cast) {
     SourceManager &SM = m_ctx->getSourceManager();
 
+    // Skip casts that originate in system headers or macro expansions.
     if (SM.isInSystemHeader(cast->getBeginLoc()))
       return true;
     if (cast->getBeginLoc().isMacroID())
@@ -83,9 +88,12 @@ public:
     const std::string cppCast = determineCppCast(cast, *m_ctx);
     const std::string typeStr = cast->getTypeAsWritten().getAsString();
 
+    // Replace "(Type)" with "cppCast<Type>("
+    // i.e. the range from '(' to ')' (inclusive) becomes the new prefix.
     SourceRange parenRange(cast->getLParenLoc(), cast->getRParenLoc());
     m_rewriter.ReplaceText(parenRange, cppCast + "<" + typeStr + ">(");
 
+    // Append closing ')' right after the sub-expression.
     SourceLocation subEnd = Lexer::getLocForEndOfToken(
         cast->getSubExpr()->getEndLoc(), 0, SM, m_ctx->getLangOpts());
     m_rewriter.InsertTextAfterToken(subEnd, ")");
