@@ -1,0 +1,157 @@
+#include "clang/AST/ASTConsumer.h"
+#include "clang/AST/RecursiveASTVisitor.h"
+#include "clang/Frontend/CompilerInstance.h"
+#include "clang/Frontend/FrontendPluginRegistry.h"
+#include "clang/Lex/Lexer.h"
+#include "clang/Rewrite/Core/Rewriter.h"
+#include "llvm/Support/raw_ostream.h"
+
+using namespace clang;
+
+namespace {
+
+static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
+  const QualType dst = expr->getType();
+  const QualType src = expr->getSubExpr()->getType();
+  const CastKind kind = expr->getCastKind();
+
+  switch (kind) {
+
+  // --- reinterpret territory --------------------------------------------
+  case CK_BitCast:
+  case CK_LValueBitCast:
+    if (dst->isVoidPointerType() || src->isVoidPointerType())
+      return "static_cast";
+    return "reinterpret_cast";
+
+  case CK_IntegralToPointer:
+  case CK_PointerToIntegral:
+  case CK_ReinterpretMemberPointer:
+    return "reinterpret_cast";
+
+  // --- const_cast territory ---------------------------------------------
+  case CK_NoOp: {
+    if (dst->isPointerType() && src->isPointerType()) {
+      QualType dstPointee = dst->getPointeeType().getUnqualifiedType();
+      QualType srcPointee = src->getPointeeType().getUnqualifiedType();
+      if (ctx.hasSameType(dstPointee, srcPointee))
+        return "const_cast";
+    }
+    if (ctx.hasSameUnqualifiedType(dst, src))
+      return "const_cast";
+    return "static_cast";
+  }
+
+  // --- dynamic_cast territory -------------------------------------------
+  case CK_BaseToDerived: {
+    QualType srcBase = src->isPointerType() ? src->getPointeeType() : src;
+    if (const auto *rd = srcBase->getAsCXXRecordDecl())
+      if (rd->isPolymorphic())
+        return "dynamic_cast";
+    return "static_cast";
+  }
+
+  // --- static_cast territory --------------------------------------------
+  case CK_DerivedToBase:
+  case CK_UncheckedDerivedToBase:
+  case CK_IntegralCast:
+  case CK_FloatingCast:
+  case CK_FloatingToIntegral:
+  case CK_IntegralToFloating:
+  case CK_ToVoid:
+  case CK_NullToPointer:
+  case CK_NullToMemberPointer:
+  case CK_PointerToBoolean:
+  case CK_IntegralToBoolean:
+  case CK_FloatingToBoolean:
+    return "static_cast";
+
+  default:
+    return "static_cast";
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Visitor: walks every CStyleCastExpr and rewrites it in-place.
+// ---------------------------------------------------------------------------
+class CastReplaceVisitor : public RecursiveASTVisitor<CastReplaceVisitor> {
+public:
+  explicit CastReplaceVisitor(ASTContext *ctx, Rewriter &rewriter)
+      : m_ctx(ctx), m_rewriter(rewriter) {}
+
+  bool VisitCStyleCastExpr(CStyleCastExpr *cast) {
+    SourceManager &SM = m_ctx->getSourceManager();
+
+    // Skip casts that originate in system headers or macro expansions.
+    if (SM.isInSystemHeader(cast->getBeginLoc()))
+      return true;
+    if (cast->getBeginLoc().isMacroID())
+      return true;
+
+    const std::string cppCast = determineCppCast(cast, *m_ctx);
+    const std::string typeStr = cast->getTypeAsWritten().getAsString();
+
+    // Replace "(Type)" with "cppCast<Type>("
+    // i.e. the range from '(' to ')' (inclusive) becomes the new prefix.
+    SourceRange parenRange(cast->getLParenLoc(), cast->getRParenLoc());
+    m_rewriter.ReplaceText(parenRange, cppCast + "<" + typeStr + ">(");
+
+    // Append closing ')' right after the sub-expression.
+    SourceLocation subEnd = Lexer::getLocForEndOfToken(
+        cast->getSubExpr()->getEndLoc(), 0, SM, m_ctx->getLangOpts());
+    m_rewriter.InsertTextAfterToken(subEnd, ")");
+
+    return true;
+  }
+
+private:
+  ASTContext *m_ctx;
+  Rewriter &m_rewriter;
+};
+
+// ---------------------------------------------------------------------------
+// Boilerplate: ASTConsumer, PluginASTAction, registration
+// ---------------------------------------------------------------------------
+class CastReplaceConsumer final : public ASTConsumer {
+public:
+  explicit CastReplaceConsumer(ASTContext *ctx, Rewriter &rewriter)
+      : m_visitor(ctx, rewriter) {}
+
+  void HandleTranslationUnit(ASTContext &ctx) override {
+    m_visitor.TraverseDecl(ctx.getTranslationUnitDecl());
+  }
+
+private:
+  CastReplaceVisitor m_visitor;
+};
+
+class CastReplaceAction final : public PluginASTAction {
+public:
+  std::unique_ptr<ASTConsumer>
+  CreateASTConsumer(CompilerInstance &ci, llvm::StringRef /*file*/) override {
+    m_rewriter.setSourceMgr(ci.getSourceManager(), ci.getLangOpts());
+    return std::make_unique<CastReplaceConsumer>(&ci.getASTContext(),
+                                                 m_rewriter);
+  }
+
+  bool ParseArgs(const CompilerInstance & /*ci*/,
+                 const std::vector<std::string> & /*args*/) override {
+    return true;
+  }
+
+  // After processing, dump the rewritten source to stderr so FileCheck can
+  // verify that every C-style cast was replaced with the correct C++ cast.
+  void EndSourceFileAction() override {
+    SourceManager &SM = m_rewriter.getSourceMgr();
+    m_rewriter.getEditBuffer(SM.getMainFileID()).write(llvm::errs());
+  }
+
+private:
+  Rewriter m_rewriter;
+};
+
+} // anonymous namespace
+
+static FrontendPluginRegistry::Add<CastReplaceAction>
+    X("cast_replace_plugin",
+      "Replace C-style casts with appropriate C++ casts");
