@@ -30,13 +30,20 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
 
   // --- const_cast territory ---------------------------------------------
   case CK_NoOp: {
-    if (dst->isPointerType() && src->isPointerType()) {
+    // In Clang 21 a CStyleCastExpr may carry CK_NoOp when the real
+    // conversion (e.g. FloatingToIntegral) is already encoded in a nested
+    // ImplicitCastExpr.  getSubExpr()->getType() would then return the
+    // *post-conversion* type, making dst == src and triggering a false
+    // const_cast.  getSubExprAsWritten() strips those implicit casts and
+    // gives the type the programmer actually wrote.
+    const QualType srcWritten = expr->getSubExprAsWritten()->getType();
+    if (dst->isPointerType() && srcWritten->isPointerType()) {
       QualType dstPointee = dst->getPointeeType().getUnqualifiedType();
-      QualType srcPointee = src->getPointeeType().getUnqualifiedType();
+      QualType srcPointee = srcWritten->getPointeeType().getUnqualifiedType();
       if (ctx.hasSameType(dstPointee, srcPointee))
         return "const_cast";
     }
-    if (ctx.hasSameUnqualifiedType(dst, src))
+    if (ctx.hasSameUnqualifiedType(dst, srcWritten))
       return "const_cast";
     return "static_cast";
   }
