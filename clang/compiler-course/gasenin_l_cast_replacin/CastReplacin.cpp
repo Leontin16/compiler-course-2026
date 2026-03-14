@@ -2,7 +2,6 @@
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
-#include "clang/Lex/Lexer.h"
 #include "clang/Rewrite/Core/Rewriter.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -94,9 +93,10 @@ public:
     m_rewriter.ReplaceText(parenRange, cppCast + "<" + typeStr + ">(");
 
     // Append closing ')' right after the sub-expression.
-    SourceLocation subEnd = Lexer::getLocForEndOfToken(
-        cast->getSubExpr()->getEndLoc(), 0, SM, m_ctx->getLangOpts());
-    m_rewriter.InsertTextAfterToken(subEnd, ")");
+    // InsertTextAfterToken internally advances past the token, so pass
+    // getEndLoc() directly — calling getLocForEndOfToken first would
+    // double-shift the position onto the following ';'.
+    m_rewriter.InsertTextAfterToken(cast->getSubExpr()->getEndLoc(), ")");
 
     return true;
   }
