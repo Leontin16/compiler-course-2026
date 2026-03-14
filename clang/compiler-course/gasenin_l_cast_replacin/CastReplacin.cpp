@@ -73,7 +73,7 @@ static std::string determineCppCast(CStyleCastExpr *expr, ASTContext &ctx) {
 
 class CastReplaceVisitor : public RecursiveASTVisitor<CastReplaceVisitor> {
 public:
-  explicit CastReplaceVisitor(ASTContext *ctx, Rewriter &rewriter)
+  CastReplaceVisitor(ASTContext *ctx, Rewriter &rewriter)
       : m_ctx(ctx), m_rewriter(rewriter) {}
 
   bool VisitCStyleCastExpr(CStyleCastExpr *cast) {
@@ -108,7 +108,7 @@ private:
 
 class CastReplaceConsumer final : public ASTConsumer {
 public:
-  explicit CastReplaceConsumer(ASTContext *ctx, Rewriter &rewriter)
+  CastReplaceConsumer(ASTContext *ctx, Rewriter &rewriter)
       : m_visitor(ctx, rewriter) {}
 
   void HandleTranslationUnit(ASTContext &ctx) override {

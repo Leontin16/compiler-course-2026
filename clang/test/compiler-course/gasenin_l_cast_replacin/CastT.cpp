@@ -1,169 +1,172 @@
-// RUN: %clang_cc1 -std=c++17 \
-// RUN:   -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext \
-// RUN:   -plugin cast_replace_plugin -fsyntax-only %s 2>&1 | FileCheck %s
+// RUN: split-file %s %t
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_arithmetic.cpp 2>&1 | FileCheck %s --check-prefix=ARITH
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_void_pointer.cpp 2>&1 | FileCheck %s --check-prefix=VOID
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_const_cast.cpp 2>&1 | FileCheck %s --check-prefix=CONST
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_reinterpret.cpp 2>&1 | FileCheck %s --check-prefix=REINT
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_hierarchy.cpp 2>&1 | FileCheck %s --check-prefix=HIER
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_to_bool.cpp 2>&1 | FileCheck %s --check-prefix=BOOL
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_to_void.cpp 2>&1 | FileCheck %s --check-prefix=TOVOID
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_null_casts.cpp 2>&1 | FileCheck %s --check-prefix=NULL
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_member_pointer_reinterpret.cpp 2>&1 | FileCheck %s --check-prefix=MEMPTR
+// RUN: %clang_cc1 -load %llvmshlibdir/gasenin_l_cast_replacin_ClangAST%pluginext -plugin cast_replace_plugin -fsyntax-only %t/test_macro_skip.cpp 2>&1 | FileCheck %s --check-prefix=MACRO
 
+// ARITH-LABEL: test_arithmetic()
+// ARITH: int i = static_cast<int>(d);
+// ARITH: double d2 = static_cast<double>(i);
+// ARITH: long l = static_cast<long>(i);
+// ARITH: float f = static_cast<float>(d);
+
+// VOID-LABEL: test_void_pointer()
+// VOID: void *vp = static_cast<void *>(p);
+// VOID: int *p2 = static_cast<int *>(vp);
+
+// CONST-LABEL: test_const_cast()
+// CONST: int *p = const_cast<int *>(cp);
+// CONST: char *mp = const_cast<char *>(ccp);
+// CONST: int j = const_cast<int>(ci);
+
+// REINT-LABEL: test_reinterpret()
+// REINT: char *cp = reinterpret_cast<char *>(ip);
+// REINT: long addr = reinterpret_cast<long>(ip);
+// REINT: int *ip2 = reinterpret_cast<int *>(addr);
+// REINT: char &cr = reinterpret_cast<char &>(x);
+
+// HIER-LABEL: test_hierarchy()
+// HIER: Base *base_ptr = static_cast<Base *>(&derived_obj);
+// HIER: Derived *d_ptr = dynamic_cast<Derived *>(b_ptr);
+// HIER: NpDerived *np_d = static_cast<NpDerived *>(np_base);
+// HIER: VBase *vb = static_cast<VBase *>(&vd);
+// HIER: DataBlock *data = reinterpret_cast<DataBlock *>(&pt);
+// HIER: Point *mut_pt = const_cast<Point *>(&cpt);
+
+// BOOL-LABEL: test_to_bool()
+// BOOL: bool bi = static_cast<bool>(i);
+// BOOL: bool bd = static_cast<bool>(d);
+// BOOL: bool bp = static_cast<bool>(p);
+
+// TOVOID-LABEL: test_to_void()
+// TOVOID: static_cast<void>(x);
+
+// NULL-LABEL: test_null_casts()
+// NULL: int *np = static_cast<int *>(0);
+// NULL: int Holder::*mp = static_cast<int Holder::*>(0);
+
+// MEMPTR-LABEL: test_member_pointer_reinterpret()
+// MEMPTR: int MpDerived::*mdp = reinterpret_cast<int MpDerived::*>(mbp);
+
+// MACRO-LABEL: test_macro_skip()
+// MACRO: int m = MACRO_CAST(int, d);
+
+//--- test_arithmetic.cpp
 void test_arithmetic() {
     double d = 3.14;
-    // CHECK: int i = static_cast<int>(d);
     int i = (int)d;
-
-    // CHECK: double d2 = static_cast<double>(i);
     double d2 = (double)i;
-
-    // CHECK: long l = static_cast<long>(i);
     long l = (long)i;
-
-    // CK_FloatingCast: narrowing float conversion  →  static_cast
-    // CHECK: float f = static_cast<float>(d);
     float f = (float)d;
 }
 
+//--- test_void_pointer.cpp
 void test_void_pointer() {
     int x = 0;
     int *p = &x;
-
-    // CHECK: void *vp = static_cast<void *>(p);
     void *vp = (void*)p;
-
-    // CHECK: int *p2 = static_cast<int *>(vp);
     int *p2 = (int*)vp;
 }
 
+//--- test_const_cast.cpp
 void test_const_cast() {
     int x = 0;
     const int *cp = &x;
-
-    // CK_NoOp (pointer): same pointee, different cv-qual  →  const_cast
-    // CHECK: int *p = const_cast<int *>(cp);
     int *p = (int*)cp;
 
     const char *ccp = "hello";
-    // CHECK: char *mp = const_cast<char *>(ccp);
     char *mp = (char*)ccp;
 
-    // CK_NoOp (value): hasSameUnqualifiedType  →  const_cast
     const int ci = 42;
-    // CHECK: int j = const_cast<int>(ci);
     int j = (int)ci;
 }
 
+//--- test_reinterpret.cpp
 void test_reinterpret() {
     int x = 42;
     int *ip = &x;
-
-    // CK_BitCast: unrelated pointer types  →  reinterpret_cast
-    // CHECK: char *cp = reinterpret_cast<char *>(ip);
     char *cp = (char*)ip;
-
-    // CK_PointerToIntegral  →  reinterpret_cast
-    // CHECK: long addr = reinterpret_cast<long>(ip);
     long addr = (long)ip;
-
-    // CK_IntegralToPointer  →  reinterpret_cast
-    // CHECK: int *ip2 = reinterpret_cast<int *>(addr);
     int *ip2 = (int*)addr;
-
-    // CK_LValueBitCast: cast reference to reference of unrelated type  →  reinterpret_cast
-    // CHECK: char &cr = reinterpret_cast<char &>(x);
     char &cr = (char&)x;
 }
 
-struct Point    { int x, y; };
-struct DataBlock{ float v[4]; };
+//--- test_hierarchy.cpp
+struct Point     { int x, y; };
+struct DataBlock { float v[4]; };
 
-class Base    { public: virtual ~Base() = default; };
-class Derived : public Base { public: int id; };
+class Base     { public: virtual ~Base() = default; };
+class Derived  : public Base { public: int id; };
 
 class NpBase    { public: int val; };
 class NpDerived : public NpBase { public: int extra; };
 
-class VBase { public: int data; };
+class VBase    { public: int data; };
 class VDerived : virtual public VBase {};
 
 void test_hierarchy() {
-    // Upcast  →  static_cast   (CK_DerivedToBase)
     Derived derived_obj;
-    // CHECK: Base *base_ptr = static_cast<Base *>(&derived_obj);
     Base *base_ptr = (Base *)&derived_obj;
 
-    // Downcast through polymorphic base  →  dynamic_cast  (CK_BaseToDerived, polymorphic)
     Base *b_ptr = new Derived();
-    // CHECK: Derived *d_ptr = dynamic_cast<Derived *>(b_ptr);
     Derived *d_ptr = (Derived *)b_ptr;
 
-    // Downcast through NON-polymorphic base  →  static_cast  (CK_BaseToDerived, non-polymorphic)
     NpBase *np_base = new NpDerived();
-    // CHECK: NpDerived *np_d = static_cast<NpDerived *>(np_base);
     NpDerived *np_d = (NpDerived *)np_base;
 
-    // Virtual base upcast  →  static_cast  (CK_UncheckedDerivedToBase)
     VDerived vd;
-    // CHECK: VBase *vb = static_cast<VBase *>(&vd);
     VBase *vb = (VBase *)&vd;
 
-    // Unrelated structs (BitCast)  →  reinterpret_cast
     Point pt = {1, 2};
-    // CHECK: DataBlock *data = reinterpret_cast<DataBlock *>(&pt);
     DataBlock *data = (DataBlock *)&pt;
 
-    // const removal on user type  →  const_cast
     const Point cpt = {0, 0};
-    // CHECK: Point *mut_pt = const_cast<Point *>(&cpt);
     Point *mut_pt = (Point *)&cpt;
 }
 
+//--- test_to_bool.cpp
 void test_to_bool() {
-    int    i   = 1;
-    double d   = 3.14;
-    int   *p   = &i;
-
-    // CK_IntegralToBoolean  →  static_cast
-    // CHECK: bool bi = static_cast<bool>(i);
+    int    i = 1;
+    double d = 3.14;
+    int   *p = &i;
     bool bi = (bool)i;
-
-    // CK_FloatingToBoolean  →  static_cast
-    // CHECK: bool bd = static_cast<bool>(d);
     bool bd = (bool)d;
-
-    // CK_PointerToBoolean  →  static_cast
-    // CHECK: bool bp = static_cast<bool>(p);
     bool bp = (bool)p;
 }
 
+//--- test_to_void.cpp
 void test_to_void() {
     int x = 0;
-    // Discarded-value expression via cast  →  static_cast
-    // CHECK: static_cast<void>(x);
     (void)x;
 }
 
+//--- test_null_casts.cpp
 struct Holder { int value; };
 
 void test_null_casts() {
-    // CK_NullToPointer  →  static_cast
-    // CHECK: int *np = static_cast<int *>(0);
     int *np = (int*)0;
-
-    // CK_NullToMemberPointer  →  static_cast
-    // CHECK: int Holder::*mp = static_cast<int Holder::*>(0);
     int Holder::*mp = (int Holder::*)0;
 }
 
+//--- test_member_pointer_reinterpret.cpp
 struct MpBase    { int a; };
-struct MpDerived { int b; };   // unrelated — forces reinterpret
+struct MpDerived { int b; };
 
 void test_member_pointer_reinterpret() {
     int MpBase::*mbp = &MpBase::a;
-    // Casting between member pointers of unrelated classes  →  reinterpret_cast
-    // CHECK: int MpDerived::*mdp = reinterpret_cast<int MpDerived::*>(mbp);
     int MpDerived::*mdp = (int MpDerived::*)mbp;
 }
 
+//--- test_macro_skip.cpp
 #define MACRO_CAST(T, v) (T)(v)
 
 void test_macro_skip() {
     double d = 2.71;
-    // The cast is inside a macro expansion — visitor must skip it.
-    // CHECK: int m = MACRO_CAST(int, d);
     int m = MACRO_CAST(int, d);
 }
