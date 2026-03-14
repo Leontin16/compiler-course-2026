@@ -92,7 +92,11 @@ public:
       return true;
 
     const std::string cppCast = determineCppCast(cast, *m_ctx);
-    const std::string typeStr = cast->getTypeAsWritten().getAsString();
+    // getTypeAsWritten() returns the internal "_Bool" spelling for bool.
+    // Use PrintingPolicy to get the canonical user-facing type name instead.
+    PrintingPolicy PP(m_ctx->getLangOpts());
+    PP.Bool = 1;
+    const std::string typeStr = cast->getTypeAsWritten().getAsString(PP);
 
     // Replace "(Type)" with "cppCast<Type>("
     // i.e. the range from '(' to ')' (inclusive) becomes the new prefix.
