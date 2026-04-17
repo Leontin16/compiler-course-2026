@@ -179,5 +179,5 @@ public:
 
 char ExamplePass::ID = 0;
 
-static RegisterPass<ExamplePass>
-    X("example-x86", "simple loop unroll pass", false, false);
+static RegisterPass<ExamplePass> X("example-x86", "simple loop unroll pass",
+                                   false, false);
