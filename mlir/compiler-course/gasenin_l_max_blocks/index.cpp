@@ -11,13 +11,13 @@ using namespace mlir;
 
 namespace {
 
-static bool isControlFlowOp(Operation *op) {
+bool isControlFlowOp(Operation *op) {
   return isa<scf::ForOp, scf::IfOp, scf::WhileOp, scf::IndexSwitchOp,
              scf::ForallOp, affine::AffineForOp, affine::AffineIfOp,
              affine::AffineParallelOp>(op);
 }
 
-static int computeMaxDepth(Operation *op) {
+int computeMaxDepth(Operation *op) {
   int childMax = 0;
   for (Region &region : op->getRegions()) {
     for (Block &block : region) {
